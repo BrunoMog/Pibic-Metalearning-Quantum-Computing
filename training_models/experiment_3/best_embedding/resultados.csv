@@ -1,0 +1,10 @@
+model,metric_score
+AdaBoostClassifier,0.9833333333333332
+BaggingClassifier,0.9833333333333332
+DecisionTreeClassifier,0.9833333333333332
+GradientBoostingClassifier,0.9833333333333332
+KNeighborsClassifier,0.9833333333333332
+LogisticRegression,0.95
+MLPClassifier,0.9666666666666668
+NearestCentroid,0.9333333333333332
+SVC,0.95
