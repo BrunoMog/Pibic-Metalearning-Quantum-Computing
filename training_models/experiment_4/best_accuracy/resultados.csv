@@ -1,6 +1,0 @@
-model,metric_score
-AdaBoostRegressor,-0.0476815936954314
-KNeighborsRegressor,-0.0650672205952166
-LinearRegression,-0.0448039326376717
-MLPRegressor,-0.0607324292752202
-SVR,-0.05824348410339491
