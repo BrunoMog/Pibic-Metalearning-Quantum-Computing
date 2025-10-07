@@ -6,13 +6,61 @@
 #SBATCH --mail-type=FAIL,END
 #SBATCH --mail-user=basb@cin.ufpe.br
 
+# Verificar se foi passado nome do ambiente
+if [[ -z "$1" ]]; then
+    echo "❌ Erro: Nome do ambiente virtual não fornecido!"
+    echo "💡 Uso: sbatch run_all.sh <nome_do_ambiente>"
+    exit 1
+fi
+
 ENV_NAME=$1
+echo "🐍 Configurando ambiente virtual: $ENV_NAME"
+
+# Carregar módulos
 module load Python3.10 Xvfb freeglut glew
+
+# Criar ambiente virtual
+echo "📦 Criando ambiente virtual..."
 python -m venv $HOME/doc/$ENV_NAME
+
+# Ativar ambiente virtual e verificar
+echo "🔌 Ativando ambiente virtual..."
 source $HOME/doc/$ENV_NAME/bin/activate
+
+# Verificar se a ativação funcionou
+echo "🔍 Verificando ativação do ambiente:"
 which python
-pip install -r ../requirements/requirements.txt
-pip list
+python --version
+echo "VIRTUAL_ENV: $VIRTUAL_ENV"
+
+# Verificar se o arquivo requirements existe
+if [[ ! -f "../requirements/requirements.txt" ]]; then
+    echo "❌ Arquivo requirements.txt não encontrado em ../requirements/requirements.txt"
+    echo "📁 Arquivos disponíveis em ../requirements/:"
+    ls -la ../requirements/ || echo "Diretório ../requirements/ não existe"
+    exit 1
+fi
+
+# Atualizar pip e instalar dependências
+echo "📦 Atualizando pip..."
+pip install --upgrade pip
+
+echo "📦 Instalando dependências..."
+if pip install -r ../requirements/requirements.txt; then
+    echo "✅ Dependências instaladas com sucesso"
+else
+    echo "❌ Falha na instalação das dependências"
+    exit 1
+fi
+
+# Verificar se as bibliotecas essenciais foram instaladas
+echo "🔍 Verificando bibliotecas instaladas:"
+python -c "import numpy; print(f'✅ numpy: {numpy.__version__}')" || { echo "❌ numpy não instalado corretamente"; exit 1; }
+python -c "import pandas; print(f'✅ pandas: {pandas.__version__}')" || { echo "❌ pandas não instalado corretamente"; exit 1; }
+python -c "import sklearn; print(f'✅ scikit-learn: {sklearn.__version__}')" || { echo "❌ scikit-learn não instalado corretamente"; exit 1; }
+python -c "import joblib; print(f'✅ joblib: {joblib.__version__}')" || { echo "❌ joblib não instalado corretamente"; exit 1; }
+
+echo "🎉 Ambiente configurado com sucesso!"
 
 # Função para logging com timestamp
 log() {
@@ -24,7 +72,8 @@ check_experiment_structure() {
     local base_dir="$1"
     local missing_dirs=()
     
-    for experiment in "best_accuracy" "best_ansatz" "best_embedding" "best_optimizer"; do
+    # ESTRUTURA CORRETA (sem best_unsupervised_metric)
+    for experiment in "best_accuracy" "best_ansatz" "best_embedding"; do
         if [[ ! -d "$base_dir/$experiment" ]]; then
             missing_dirs+=("$experiment")
         fi
@@ -42,7 +91,7 @@ run_experiment() {
     local experiment_dir="$1"
     local experiment_name="$2"
     
-    log "▶️  Executando $experiment_name em $experiment_dir..."
+    log "▶️  Executando $experiment_name..."
     
     if [[ ! -f "$experiment_dir/main.py" ]]; then
         log "❌ Arquivo main.py não encontrado em $experiment_dir"
@@ -54,13 +103,27 @@ run_experiment() {
         return 1
     }
     
-    # Executar o experimento com timeout de 2 horas
-    if timeout 7200 python main.py; then
+    # Garantir que o ambiente virtual está ativo
+    source $HOME/doc/$ENV_NAME/bin/activate
+    
+    # Verificar bibliotecas antes de executar
+    if ! python -c "import numpy, pandas, sklearn, joblib" 2>/dev/null; then
+        log "❌ Bibliotecas não disponíveis no ambiente - reativando..."
+        source $HOME/doc/$ENV_NAME/bin/activate
+        if ! python -c "import numpy, pandas, sklearn, joblib" 2>/dev/null; then
+            log "❌ Falha crítica: bibliotecas não encontradas"
+            cd - > /dev/null
+            return 1
+        fi
+    fi
+    
+    # Executar o experimento com timeout de 4 horas
+    if timeout 14400 python main.py; then
         log "✅ $experiment_name concluído com sucesso"
     else
         local exit_code=$?
         if [[ $exit_code -eq 124 ]]; then
-            log "⏰ $experiment_name interrompido por timeout (2h)"
+            log "⏰ $experiment_name interrompido por timeout (4h)"
         else
             log "❌ $experiment_name falhou com código $exit_code"
         fi
@@ -79,28 +142,34 @@ EXPERIMENT_DIRS=()
 for dir in */; do
     dir="${dir%/}"  # Remove trailing slash
     
-    # Verificar se é um diretório de experimento (contém os 4 subdiretórios)
+    # Pular arquivos Python
+    if [[ "$dir" == *".py" ]]; then
+        continue
+    fi
+    
+    # Verificar se é um diretório de experimento
     if check_experiment_structure "$dir"; then
         EXPERIMENT_DIRS+=("$dir")
         log "📁 Experimento encontrado: $dir"
+    else
+        log "⚠️  $dir não possui estrutura de experimento completa"
     fi
 done
 
 # Verificar se encontrou experimentos
 if [[ ${#EXPERIMENT_DIRS[@]} -eq 0 ]]; then
     log "❌ Nenhum diretório de experimento válido encontrado!"
-    log "💡 Estrutura esperada: experiment_X/{best_accuracy,best_ansatz,best_embedding,best_unsupervised_metric}/"
+    log "💡 Estrutura esperada: experiment_X/{best_accuracy,best_ansatz,best_embedding}/"
     exit 1
 fi
 
 log "📊 Total de experimentos encontrados: ${#EXPERIMENT_DIRS[@]}"
 
-# Tipos de experimentos para executar
+# TIPOS DE EXPERIMENTOS CORRIGIDOS (sem best_unsupervised_metric)
 EXPERIMENT_TYPES=(
     "best_accuracy"
     "best_ansatz" 
     "best_embedding"
-    "best_unsupervised_metric"
 )
 
 # Contadores para estatísticas
