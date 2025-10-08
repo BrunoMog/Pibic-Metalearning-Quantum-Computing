@@ -25,7 +25,7 @@ from CustomCrossValScore import custom_cross_val_score
 warnings.filterwarnings("ignore", category=UserWarning)
 
 # carregar dados
-df = pd.read_csv("./../../../meta_dados/input_data/experiment_1/best_embedding_sample_1.csv")
+df = pd.read_csv("./../../../meta_dados/input_data/experiment_1/best_optimizer_sample_1.csv")
 X = df.drop(columns=["original_index","target"]).to_numpy()
 X_original_index = df["original_index"].to_numpy()
 y = df["target"].to_numpy()

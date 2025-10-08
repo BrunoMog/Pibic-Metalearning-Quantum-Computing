@@ -53,15 +53,6 @@ else
     exit 1
 fi
 
-# Verificar se as bibliotecas essenciais foram instaladas
-echo "🔍 Verificando bibliotecas instaladas:"
-python -c "import numpy; print(f'✅ numpy: {numpy.__version__}')" || { echo "❌ numpy não instalado corretamente"; exit 1; }
-python -c "import pandas; print(f'✅ pandas: {pandas.__version__}')" || { echo "❌ pandas não instalado corretamente"; exit 1; }
-python -c "import sklearn; print(f'✅ scikit-learn: {sklearn.__version__}')" || { echo "❌ scikit-learn não instalado corretamente"; exit 1; }
-python -c "import joblib; print(f'✅ joblib: {joblib.__version__}')" || { echo "❌ joblib não instalado corretamente"; exit 1; }
-
-echo "🎉 Ambiente configurado com sucesso!"
-
 # Função para logging com timestamp
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
@@ -170,6 +161,7 @@ EXPERIMENT_TYPES=(
     "best_accuracy"
     "best_ansatz" 
     "best_embedding"
+    "best_optimizer"
 )
 
 # Contadores para estatísticas

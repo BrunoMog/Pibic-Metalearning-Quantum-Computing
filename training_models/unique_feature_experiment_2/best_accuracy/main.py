@@ -1,271 +1,221 @@
 import os
+import sys
 import numpy as np
 import pandas as pd
 import joblib
 import warnings
+import pickle
 
 from sklearn.model_selection import KFold, RandomizedSearchCV
-from sklearn.tree import DecisionTreeRegressor
-from sklearn.ensemble import AdaBoostRegressor, RandomForestRegressor
-from sklearn.neighbors import KNeighborsRegressor
-from sklearn.linear_model import LinearRegression
-from sklearn.neural_network import MLPRegressor
-from sklearn.svm import SVR
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import AdaBoostClassifier, BaggingClassifier, GradientBoostingClassifier, RandomForestClassifier
+from sklearn.neighbors import KNeighborsClassifier, NearestCentroid
+from sklearn.linear_model import LogisticRegression
+from sklearn.neural_network import MLPClassifier
+from sklearn.svm import SVC
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
 
-# Suprimir warnings de convergência
+from imblearn.over_sampling import RandomOverSampler
+from imblearn.pipeline import Pipeline as ImbPipeline
+
 warnings.filterwarnings("ignore", category=UserWarning)
 
-# abrindo os metadados
-df = pd.read_csv("./../../../meta_dados/input_data/experiment_2/best_accuracy_sample_2.csv")
+# Caminho do CSV de entrada (ajuste se necessário)
+INPUT_CSV = "./../../../meta_dados/input_data/experiment_2/best_accuracy_sample_2.csv"
+
+# Ler dados
+df = pd.read_csv(INPUT_CSV)
+# remover coluna original_index se existir
+df = df.drop(columns=["original_index"], errors='ignore')
 X = df.drop(columns=["target"]).to_numpy()
 y = df["target"].to_numpy()
 
-# criando KFold
-kf = KFold(n_splits=60, shuffle=True, random_state=42) 
+print(f"DEBUG: df.shape={df.shape} | X.shape={X.shape} | n_classes={(np.unique(y)).size}")
 
-param_grid_ada_boost_regressor = {
-    'n_estimators': [30, 50, 70, 100],
-    'learning_rate': [0.1, 0.3 ,0.5, 0.7, 1.0],
-    'loss': ['linear', 'square'],  # compatível com regressão
-    'estimator__max_depth': [1, 2, 3, None],
-    'estimator__min_samples_split': [2, 5, 10],
-    'estimator__min_samples_leaf': [1, 2, 4],
-    'estimator__criterion': ['squared_error', 'friedman_mse']
-}
+# KFold para classificação com features individuais
+kf = KFold(n_splits=5, shuffle=True, random_state=42)
 
-param_grid_decision_tree_regressor = {
-    'max_depth': [3, 5, 7, None],
-    'min_samples_split': [2, 5, 10, 15, 20, 25, 30],
-    'min_samples_leaf': [1, 2, 4, 5, 10, 15, 20, 30, 35, 40],
-    'criterion': ['squared_error', 'friedman_mse']
-}
-
-param_grid_knn_regressor = {
-    'n_neighbors': [3, 5, 10, 20],
-    'weights': ['uniform', 'distance'],
-    'algorithm': ['auto', 'ball_tree', 'kd_tree'],
-    'leaf_size': [15, 30, 60],
-    'p': [1, 2],
-    'metric': ['euclidean', 'manhattan']
-}
-
-param_grid_linear_regressor = {
-    'positive': [True, False]
-}
-
-param_grid_mlp_regressor = [
-    {
-        'activation': ['relu', 'tanh'],
-        'solver': ['adam'],
-        'learning_rate': ['constant', 'adaptive'],
-        'hidden_layer_sizes': [
-            (50,), (100,), (150,),
-            (50, 50), (100, 100), (150, 150),
-            (50, 50, 50), (100, 100, 100)
-        ],
-        'alpha': [0.0001, 0.001, 0.01],
-        'max_iter': [100, 200, 300],
-        'early_stopping': [True]
-    },
-    {
-        'activation': ['tanh', 'relu'],
-        'solver': ['sgd'],
-        'learning_rate': ['constant', 'invscaling', 'adaptive'],
-        'hidden_layer_sizes': [
-            (50,), (100,), (150,),
-            (50, 50), (100, 100), (150, 150),
-            (50, 50, 50), (100, 100, 100)
-        ],
-        'alpha': [0.0001, 0.001, 0.01],
-        'max_iter': [100, 200, 300],
-        'nesterovs_momentum': [True],
-        'early_stopping': [True]
-    }
-]
-
-param_grid_svr = {
-    'kernel': ['linear', 'poly', 'rbf', 'sigmoid'],
-    'degree': [2, 3, 4],
-    'gamma': ['scale', 'auto'],
-    'coef0': [0.0, 0.5, 1.0],
-    'tol': [1e-4, 1e-3, 1e-2],
-    'C': [0.1, 1.0, 10.0],
-    'epsilon': [0.1, 0.5]
-}
-
-param_grid_random_forest_regressor = {
-    'n_estimators': [50, 100, 200],
-    'criterion': ['squared_error', 'friedman_mse', 'poisson', 'absolute_error'],
-    'max_depth': [None, 10, 20, 30],
-    'min_samples_split': [2, 5, 10],
-    'min_samples_leaf': [1, 2, 4],
-    'bootstrap': [True, False]
-}
-
-# salvar resultados
-def save_results(random_search, feature_index, filename="./resultados_individual_features_optimized.csv"):
-    """
-    Verifica se o arquivo CSV existe, cria se não existir, e adiciona uma nova linha com model, best_score_ e feature.
-    
-    Args:
-        random_search (RandomizedSearchCV): Objeto RandomizedSearchCV treinado
-        feature_index (int): Índice da feature utilizada
-        filename (str): Nome do arquivo CSV (padrão: './resultados_individual_features_optimized.csv')
-    """
-    # Obtém o nome do modelo
-    model_name = random_search.estimator.__class__.__name__
-    # Obtém o melhor score (neg_mean_squared_error, convertido para positivo se necessário)
-    metric_score = random_search.best_score_
-    
-    # Dados da nova linha
-    new_data = pd.DataFrame({
-        'model': [model_name],
-        'metric_score': [metric_score],
-        'feature_index': [feature_index]
-    })
-    
-    # Verifica se o arquivo existe
-    if not os.path.exists(filename):
-        # Cria o arquivo com as colunas model, metric_score e feature_index
-        new_data.to_csv(filename, index=False)
-    else:
-        # Adiciona a nova linha ao arquivo existente
-        existing_data = pd.read_csv(filename)
-        updated_data = pd.concat([existing_data, new_data], ignore_index=True)
-        updated_data.to_csv(filename, index=False)
-
-# Dicionário com todos os modelos e seus parâmetros - CORRIGIDO
+# modelos e grids (grids pequenos para execução razoável)
 models_config = {
-    'AdaBoostRegressor': {
-        'model': AdaBoostRegressor(random_state=42, estimator=DecisionTreeRegressor(random_state=42)),
-        'params': param_grid_ada_boost_regressor  # CORRIGIDO
+    'AdaBoostClassifier': {
+        'classifier': AdaBoostClassifier(random_state=42, estimator=DecisionTreeClassifier(random_state=42)),
+        'params': {
+            'n_estimators': [50, 100],
+            'learning_rate': [0.1, 0.5, 1.0]
+        }
     },
-    'DecisionTreeRegressor': {  # ADICIONADO
-        'model': DecisionTreeRegressor(random_state=42),
-        'params': param_grid_decision_tree_regressor
+    'BaggingClassifier': {
+        'classifier': BaggingClassifier(random_state=42, estimator=DecisionTreeClassifier(random_state=42)),
+        'params': {
+            'n_estimators': [30, 50],
+            'max_samples': [0.5, 1.0]
+        }
     },
-    'KNeighborsRegressor': {
-        'model': KNeighborsRegressor(),
-        'params': param_grid_knn_regressor  # CORRIGIDO
+    'DecisionTreeClassifier': {
+        'classifier': DecisionTreeClassifier(random_state=42),
+        'params': {
+            'max_depth': [None, 3, 5],
+            'min_samples_split': [2, 5]
+        }
     },
-    'LinearRegression': {
-        'model': LinearRegression(),
-        'params': param_grid_linear_regressor  # CORRIGIDO
+    'GradientBoostingClassifier': {
+        'classifier': GradientBoostingClassifier(random_state=42),
+        'params': {
+            'n_estimators': [50, 100],
+            'learning_rate': [0.01, 0.1]
+        }
     },
-    'MLPRegressor': {
-        'model': MLPRegressor(random_state=42),
-        'params': param_grid_mlp_regressor  # CORRIGIDO
+    'KNeighborsClassifier': {
+        'classifier': KNeighborsClassifier(),
+        'params': {
+            'n_neighbors': [3, 5, 7],
+            'weights': ['uniform', 'distance']
+        }
     },
-    'SVR': {
-        'model': SVR(),
-        'params': param_grid_svr  # CORRIGIDO
+    'LogisticRegression': {
+        'classifier': LogisticRegression(max_iter=500, random_state=42),
+        'params': {
+            'C': [0.01, 0.1, 1.0],
+            'penalty': ['l2', None],
+            'solver': ['lbfgs']
+        }
     },
-    'RandomForestRegressor': {  # ADICIONADO
-        'model': RandomForestRegressor(random_state=42),
-        'params': param_grid_random_forest_regressor
+    'MLPClassifier': {
+        'classifier': MLPClassifier(random_state=42),
+        'params': {
+            'hidden_layer_sizes': [(50,), (100,)],
+            'activation': ['relu', 'tanh'],
+            'alpha': [1e-4, 1e-3]
+        }
+    },
+    'NearestCentroid': {
+        'classifier': NearestCentroid(),
+        'params': {
+            'metric': ['euclidean', 'manhattan']
+        }
+    },
+    'RandomForestClassifier': {
+        'classifier': RandomForestClassifier(random_state=42),
+        'params': {
+            'n_estimators': [50, 100],
+            'max_depth': [None, 10]
+        }
+    },
+    'SVC': {
+        'classifier': SVC(probability=True, random_state=42),
+        'params': {
+            'C': [0.1, 1, 10],
+            'kernel': ['linear', 'rbf']
+        }
     }
 }
 
-# Treinamento com features individuais
+scalers = [None, StandardScaler(), MinMaxScaler()]
+oversamplers = {'none': None, 'RandomOverSampler': RandomOverSampler(random_state=42)}
+
+RESULTS_FILE = "./resultados.csv"
+SAVED_MODELS_DIR = "./saved_models"
+os.makedirs(SAVED_MODELS_DIR, exist_ok=True)
+
+def prefix_params(params, prefix="clf__"):
+    """Adiciona prefixo aos nomes de hyperparams para usar dentro do pipeline ('clf__param')."""
+    pref = {}
+    for k, v in params.items():
+        pref[f"{prefix}{k}"] = v
+    return pref
+
+def upsert_best_result_classification(best_score, pipeline_obj, feature_index, model_name, oversampler_name, scaler_name, filename=RESULTS_FILE):
+    """
+    Insere ou atualiza o melhor resultado (maior score) para (model_name, feature_index).
+    Salva pipeline_obj em saved_models/{model_name}_feature_{feature_index}.joblib quando melhora.
+    """
+    if os.path.exists(filename):
+        try:
+            existing = pd.read_csv(filename)
+        except Exception:
+            existing = pd.DataFrame(columns=['model','metric_score','feature_index','oversampling','scaler'])
+    else:
+        existing = pd.DataFrame(columns=['model','metric_score','feature_index','oversampling','scaler'])
+
+    mask = (existing['model'] == model_name) & (existing['feature_index'] == feature_index)
+    if mask.any():
+        current_score = existing.loc[mask, 'metric_score'].astype(float).max()
+        if float(best_score) > float(current_score):
+            existing = existing[~mask]
+            new_row = {'model': model_name, 'metric_score': best_score, 'feature_index': feature_index, 'oversampling': oversampler_name, 'scaler': scaler_name}
+            existing = pd.concat([existing, pd.DataFrame([new_row])], ignore_index=True)
+        else:
+            return
+    else:
+        new_row = {'model': model_name, 'metric_score': best_score, 'feature_index': feature_index, 'oversampling': oversampler_name, 'scaler': scaler_name}
+        existing = pd.concat([existing, pd.DataFrame([new_row])], ignore_index=True)
+
+    existing.to_csv(filename, index=False)
+
+    # salvar pipeline que gerou o resultado (nome sem scaler/oversampler para consistência)
+    model_filename = os.path.join(SAVED_MODELS_DIR, f"{model_name}_feature_{feature_index}.joblib")
+    try:
+        joblib.dump(pipeline_obj, model_filename)
+    except Exception:
+        with open(model_filename + ".pkl", "wb") as f:
+            pickle.dump(pipeline_obj, f)
+
 print(f"Dataset possui {X.shape[1]} features")
-print("Iniciando treinamento com features individuais (versão otimizada)...")
+print("Iniciando busca de melhor acurácia por feature (isolado)...")
 
 for feature_idx in range(X.shape[1]):
-    print(f"\nTreinando com feature {feature_idx + 1}/{X.shape[1]}")
-    
-    # Selecionar apenas uma feature
+    print(f"\n=== FEATURE {feature_idx+1}/{X.shape[1]} ===")
     X_single_feature = X[:, feature_idx].reshape(-1, 1)
-    
-    # Treinar cada modelo
-    for model_name, config in models_config.items():
-        print(f"  Treinando {model_name}...", end=" ")
-        
-        try:
-            # Tratar MLPRegressor que tem lista de param_grids
-            if isinstance(config['params'], list):
-                # Para MLPRegressor que tem múltiplos param_grids
-                best_score_overall = float('-inf')
-                best_model_overall = None
-                
-                for param_grid in config['params']:
+
+    for scaler in scalers:
+        scaler_name = "None" if scaler is None else scaler.__class__.__name__
+        for overs_name, overs in oversamplers.items():
+            for model_name, cfg in models_config.items():
+                print(f"  Testando {model_name} | scaler={scaler_name} | oversampler={overs_name} ...", end=" ")
+                try:
+                    steps = []
+                    if scaler is not None:
+                        steps.append(("scaler", scaler))
+                    if overs is not None:
+                        steps.append(("oversampler", overs))
+                    steps.append(("clf", cfg['classifier']))
+                    pipeline = ImbPipeline(steps=steps)
+
+                    # ajustar param_grid para o pipeline
+                    param_grid = prefix_params(cfg['params'], prefix="clf__")
+
                     random_search = RandomizedSearchCV(
-                        estimator=config['model'],
+                        estimator=pipeline,
                         param_distributions=param_grid,
                         cv=kf,
-                        scoring='neg_mean_squared_error',
+                        scoring='accuracy',
+                        n_iter=50,
                         n_jobs=-1,
                         verbose=0,
-                        random_state=42,
-                        n_iter=20  # Reduzido por param_grid
+                        random_state=42
                     )
-                    
+
                     random_search.fit(X_single_feature, y)
-                    
-                    if random_search.best_score_ > best_score_overall:
-                        best_score_overall = random_search.best_score_
-                        best_model_overall = random_search.best_estimator_
-                
-                # Criar um objeto mock para save_results
-                class MockRandomSearch:
-                    def __init__(self, estimator, best_score):
-                        self.estimator = estimator
-                        self.best_score_ = best_score
-                        self.best_estimator_ = best_model_overall
-                
-                mock_search = MockRandomSearch(config['model'], best_score_overall)
-                save_results(mock_search, feature_idx)
-                
-                # Salvar o melhor modelo
-                model_filename = f"./saved_models/{model_name}_feature_{feature_idx}.joblib"
-                os.makedirs("./saved_models", exist_ok=True)
-                joblib.dump(best_model_overall, model_filename)
-                
-                print(f"MSE: {-best_score_overall:.6f}")
-                
-            else:
-                # Para modelos com param_grid único
-                random_search = RandomizedSearchCV(
-                    estimator=config['model'],
-                    param_distributions=config['params'],
-                    cv=kf,
-                    scoring='neg_mean_squared_error',
-                    n_jobs=-1,
-                    verbose=0,
-                    random_state=42,
-                    n_iter=40
-                )
-                
-                # Executar o RandomizedSearchCV
-                random_search.fit(X_single_feature, y)
-                
-                # Salvar resultados
-                save_results(random_search, feature_idx)
-                
-                # Salvar o melhor modelo
-                model_filename = f"./saved_models/{model_name}_feature_{feature_idx}.joblib"
-                os.makedirs("./saved_models", exist_ok=True)
-                joblib.dump(random_search.best_estimator_, model_filename)
-                
-                print(f"MSE: {-random_search.best_score_:.6f}")
-            
-        except Exception as e:
-            print(f"Erro: {str(e)}")
-            continue
 
-print("\nTreinamento concluído! Resultados salvos em 'resultados_individual_features_optimized.csv'")
+                    best_score = random_search.best_score_
+                    best_pipeline = random_search.best_estimator_
 
-# Análise dos resultados
-if os.path.exists("./resultados_individual_features_optimized.csv"):
-    results_df = pd.read_csv("./resultados_individual_features_optimized.csv")
+                    # inserir/atualizar apenas se for o melhor por model+feature
+                    upsert_best_result_classification(best_score, best_pipeline, feature_idx, model_name, overs_name, scaler_name)
+
+                    print(f"acc={best_score:.6f}")
+
+                except Exception as e:
+                    print(f"Erro: {e}")
+                    continue
+
+print("\nProcesso concluído. Arquivo de resultados:", RESULTS_FILE)
+
+# Sumário final
+if os.path.exists(RESULTS_FILE):
+    results_df = pd.read_csv(RESULTS_FILE)
     print("\nResumo dos resultados:")
-    print(results_df.groupby('model')['metric_score'].agg(['mean', 'std', 'min', 'max']).round(6))
-    
-    # Melhor resultado por feature
-    print("\nMelhor modelo por feature:")
-    best_by_feature = results_df.loc[results_df.groupby('feature_index')['metric_score'].idxmax()]
-    print(best_by_feature[['feature_index', 'model', 'metric_score']].round(6))
-    
-    # Features mais importantes (baseado no melhor MSE)
-    print("\nTop 10 features com melhor performance:")
-    top_features = best_by_feature.nsmallest(10, 'metric_score')
-    print(top_features[['feature_index', 'model', 'metric_score']].round(6))
+    print(results_df.groupby('model')['metric_score'].agg(['mean','std','min','max']).round(6))
+    best_by_feature = results_df.loc[results_df.groupby('feature_index')['metric_score'].idxmax()].reset_index(drop=True)
+    print("\nMelhor por feature:")
+    print(best_by_feature[['feature_index','model','metric_score','scaler','oversampling']].head(20))

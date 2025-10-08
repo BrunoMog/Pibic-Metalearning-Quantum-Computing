@@ -25,13 +25,13 @@ from CustomCrossValScore import custom_cross_val_score
 warnings.filterwarnings("ignore", category=UserWarning)
 
 # carregar dados
-df = pd.read_csv("./../../../meta_dados/input_data/experiment_2/best_embedding_sample_2.csv")
+df = pd.read_csv("./../../../meta_dados/input_data/experiment_2/best_optimizer_sample_2.csv")
 X = df.drop(columns=["original_index","target"]).to_numpy()
 X_original_index = df["original_index"].to_numpy()
 y = df["target"].to_numpy()
 
 # carregar o mapping de índices originais
-with open("./../../../meta_dados/input_data/mapping_embedding_target.pkl", "rb") as f:
+with open("./../../../meta_dados/input_data/mapping_optimizer_target.pkl", "rb") as f:
     mapping_y_custom = pickle.load(f)
 
 mapping_y_custom = mapping_y_custom[2]
